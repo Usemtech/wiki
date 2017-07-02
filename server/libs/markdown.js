@@ -92,6 +92,61 @@ const videoRules = [
 const textRegex = new RegExp('\\b[a-z0-9-.,' + appdata.regex.cjk + appdata.regex.arabic + ']+\\b', 'g')
 
 /**
+ * @param     {Array<Node>} array The TOC as a flat array.
+ * @param     {Number} requestedLevel the level of the TOC to build.
+ * @param     {Context} requestedLevelContext context for building TOC at the `requestedLevel`.
+ * @param     {Number} requestedLevelContext.startFrom the index in `array` to start from.
+ * @return    {Array<Node>} TOC as a tree at the `requestedLevel`.
+ */
+function buildTreeFlatArray(array, requestedLevel, requestedLevelContext) {
+  requestedLevel = requestedLevel || 1
+  requestedLevelContext = requestedLevelContext || {}
+  requestedLevelContext.startFrom = requestedLevelContext.startFrom || 0
+
+  let requestedLevelTree = []
+
+  let index = requestedLevelContext.startFrom
+  while (index < array.length) {
+    let currentNode = array[index]
+
+    // stop when the level of the current node is smaller than the requested level
+    if (currentNode.level < requestedLevel) {
+      break
+    }
+
+    // add nodes with level equal to the requested level to the tree
+    else if (currentNode.level === requestedLevel) {
+      requestedLevelTree.push({
+        content: currentNode.content,
+        anchor: currentNode.anchor,
+        nodes: []
+      })
+
+      // go to next node
+      index++
+    }
+
+    // build a tree from nodes with level greater than the requested level
+    // and it to the last node in the requested level tree
+    else {
+      let nextLevelContext = {
+        startFrom: index
+      }
+      let nextLevelTree = buildTreeFlatArray(array, currentNode.level, nextLevelContext)
+      requestedLevelTree[requestedLevelTree.length - 1].nodes = nextLevelTree
+
+      // continue from where processing of children has stoped
+      index = nextLevelContext.startFrom
+    }
+  }
+
+  // remember the last processed position
+  requestedLevelContext.startFrom = index
+
+  return requestedLevelTree
+}
+
+/**
  * Parse markdown content and build TOC tree
  *
  * @param      {(Function|string)}  content  Markdown content
@@ -133,44 +188,11 @@ const parseTree = (content) => {
 
   // -> Exclude levels deeper than 2
 
-  _.remove(tocArray, (n) => { return n.level > 2 })
+  _.remove(tocArray, (n) => { return n.level > 3 })
 
   // -> Build tree from flat array
 
-  return _.reduce(tocArray, (tree, v) => {
-    let treeLength = tree.length - 1
-    if (v.level < 2) {
-      tree.push({
-        content: v.content,
-        anchor: v.anchor,
-        nodes: []
-      })
-    } else {
-      let lastNodeLevel = 1
-      let GetNodePath = (startPos) => {
-        lastNodeLevel++
-        if (_.isEmpty(startPos)) {
-          startPos = 'nodes'
-        }
-        if (lastNodeLevel === v.level) {
-          return startPos
-        } else {
-          return GetNodePath(startPos + '[' + (_.at(tree[treeLength], startPos).length - 1) + '].nodes')
-        }
-      }
-      let lastNodePath = GetNodePath()
-      let lastNode = _.get(tree[treeLength], lastNodePath)
-      if (lastNode) {
-        lastNode.push({
-          content: v.content,
-          anchor: v.anchor,
-          nodes: []
-        })
-        _.set(tree[treeLength], lastNodePath, lastNode)
-      }
-    }
-    return tree
-  }, [])
+  return buildTreeFlatArray(tocArray)
 }
 
 /**
